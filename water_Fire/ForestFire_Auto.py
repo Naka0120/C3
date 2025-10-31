@@ -65,7 +65,14 @@ class SIRCellularAutomataInteractive:
 
         self.infection_time = np.zeros((grid_size, grid_size), dtype=np.int32)
         
-        # --- Cellオブジェクトグリッドの生成 ---
+        # --- WATERのライフサイクル管理（タイマーと元状態を保持）---
+        self.water_timer = np.zeros((grid_size, grid_size), dtype=np.int32)           # WATER設置からの経過ステップ
+        self.water_prev_state = np.full((grid_size, grid_size), -1, dtype=np.int32)   # WATERを置いた時の元状態を保持
+        # デフォルトの経過ステップ（必要に応じて調整）
+        self.WATER_ON_ACTIVE_DURATION = 5   # ACTIVE上のWATERがこのステップ数経過でBURNEDに変化
+        self.WATER_ON_GREEN_DURATION = 20   # GREEN上のWATERがこのステップ数経過で再びGREENに戻る
+
+        # --- Cellオブジェクトグリッドの生成 --- 
         # Cellクラスは既存のものを利用
         from cells import Cell 
         self.grid = np.empty((grid_size, grid_size), dtype=object)
@@ -173,8 +180,12 @@ class SIRCellularAutomataInteractive:
                         ni, nj = i + di, j + dj
                         if 0 <= ni < self.grid_size and 0 <= nj < self.grid_size:
                             # 樹木、火災、燃え跡のセルのみを水に変換（川はそのまま）
-                            if self.grid[ni, nj].state in [GREEN, ACTIVE, BURNED]:
+                            prev = self.grid[ni, nj].state
+                            if prev in [GREEN, ACTIVE, BURNED]:
+                                # 元状態を記録してタイマーをリセット
                                 self.grid[ni, nj].state = WATER
+                                self.water_timer[ni, nj] = 0
+                                self.water_prev_state[ni, nj] = prev
                                 water_placed = True
                 
                 # 描画を強制更新

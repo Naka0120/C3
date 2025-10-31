@@ -19,8 +19,8 @@ if __name__ == '__main__':
         "base_lon": 135.252,
     }
     csv_params = {
-        "csv_filepath_elev": "C:\\Users\\souta\\AppData\\Roaming\\Code\\sorcecode\\C_Cube\\slope_Fire\\Chiri_Fire\\elevation_grid.csv",
-        "csv_filepath_vege": "C:\\Users\\souta\\AppData\\Roaming\\Code\\sorcecode\\C_Cube\\slope_Fire\\Chiri_Fire\\vegetation_grid.csv"
+        "csv_filepath_elev": "Chiri_Fire\\elevation_grid.csv",
+        "csv_filepath_vege": "Chiri_Fire\\vegetation_grid.csv"
     }
     all_params = sim_params.copy()
     all_params["terrain_mode"] = TERRAIN_MODE
@@ -33,7 +33,7 @@ if __name__ == '__main__':
     center = sim_params["grid_size"] // 2
     sir_ca.grid[center, center].state = ACTIVE
 
-    t_end = 500
+    t_end = 150
     frames = []
     cmap = ListedColormap([
         '#e0ffe0', '#80ff80', '#00cc44', '#006622', # GREEN (密度4段階)
@@ -84,10 +84,10 @@ if __name__ == '__main__':
 
     plt.close(fig)
     print("GIF動画を保存中...")
-    imageio.mimsave("forestfire_simulation_chile.gif", frames, fps=10)
-    print("forestfire_simulation_chile.gif を保存しました。")
+    imageio.mimsave("forestfire_simulation_chile_rev.gif", frames, fps=10)
+    print("forestfire_simulation_chile_rev.gif を保存しました。")
     print("MP4動画を保存中...")
-    with imageio.get_writer("forestfire_simulation_chile.mp4", fps=10, codec='libx264') as writer:
+    with imageio.get_writer("forestfire_simulation_chile_rev.mp4", fps=10, codec='libx264') as writer:
         for frame in frames:
             writer.append_data(frame)
-    print("forestfire_simulation_chile.mp4 を保存しました。")
+    print("forestfire_simulation_chile_rev.mp4 を保存しました。")

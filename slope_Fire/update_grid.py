@@ -63,12 +63,19 @@ class GridUpdater:
                 recovery_step = 10*(60*(cell.density **1.5))/(1+0.2*wind) 
 
                 if cell.state in [self.params['GREEN']]:
-                    # 密度による係数
-                    if cell.density < 0.25: P_den = -0.6
-                    elif cell.density < 0.5: P_den = -0.3
-                    elif cell.density < 0.75: P_den = -0.1
-                    else: P_den = 0.1
-                    
+                    # 密度による係数 
+                    # 原っぱ<低木<灌木<森林
+                    # if cell.density < 0.25: P_den = -0.6
+                    # elif cell.density < 0.5: P_den = -0.3
+                    # elif cell.density < 0.75: P_den = -0.1
+                    # else: P_den = 0.1
+
+                    # 原っぱ>低木>灌木>森林
+                    if cell.density < 0.25: P_den = 0.1
+                    elif cell.density < 0.5: P_den = -0.2
+                    elif cell.density < 0.75: P_den = -0.5
+                    else: P_den = -0.6
+
                     P_veg = 0.0 # 植生の種類(野原:-0.3, 広葉樹:0, 針葉樹:0.3)
                     # P_w = 1.0 # 風速の影響
 
