@@ -69,8 +69,8 @@ class SIRCellularAutomataInteractive:
         self.water_timer = np.zeros((grid_size, grid_size), dtype=np.int32)           # WATER設置からの経過ステップ
         self.water_prev_state = np.full((grid_size, grid_size), -1, dtype=np.int32)   # WATERを置いた時の元状態を保持
         # デフォルトの経過ステップ（必要に応じて調整）
-        self.WATER_ON_ACTIVE_DURATION = 5   # ACTIVE上のWATERがこのステップ数経過でBURNEDに変化
-        self.WATER_ON_GREEN_DURATION = 20   # GREEN上のWATERがこのステップ数経過で再びGREENに戻る
+        self.WATER_ON_ACTIVE_DURATION = 2   # ACTIVE上のWATERがこのステップ数経過でBURNEDに変化
+        self.WATER_ON_GREEN_DURATION = 3   # GREEN上のWATERがこのステップ数経過で再びGREENに戻る
 
         # --- Cellオブジェクトグリッドの生成 --- 
         # Cellクラスは既存のものを利用
@@ -141,6 +141,40 @@ class SIRCellularAutomataInteractive:
             self.infection_probability,
             self.cell_size_m
         )
+
+        # --- ★★★ 水の消滅ロジック ★★★ ---
+        grid_size = self.grid_size
+        
+        # 1. WATERタイマーをインクリメント
+        water_mask = (self.state_grid == WATER)
+        self.water_timer[water_mask] += 1
+        
+        # 2. WATERセルの状態をチェックし、元に戻す
+        for i in range(grid_size):
+            for j in range(grid_size):
+                cell = self.grid[i, j]
+                if cell.state == WATER:
+                    timer = self.water_timer[i, j]
+                    prev_state = self.water_prev_state[i, j]
+                    
+                    new_state = WATER # 初期値はWATERのまま
+                    
+                    # 燃えている場所を消火した場合 (ACTIVE -> BURNED)
+                    if prev_state == ACTIVE and timer >= self.WATER_ON_ACTIVE_DURATION:
+                        new_state = BURNED
+                        
+                    # 燃えていない場所を濡らした場合 (GREEN -> GREEN)
+                    elif prev_state == GREEN and timer >= self.WATER_ON_GREEN_DURATION:
+                        new_state = GREEN
+                        
+                    # 水の消滅が決定した場合、状態を更新
+                    if new_state != WATER:
+                        cell.state = new_state
+                        self.water_timer[i, j] = 0 # タイマーをリセット
+                        self.water_prev_state[i, j] = -1 # 元状態をリセット
+        # --- ★★★ 水の消滅ロジックここまで ★★★ ---
+
+
         # 状態グリッドも更新
         for i in range(self.grid_size):
             for j in range(self.grid_size):

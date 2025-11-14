@@ -12,7 +12,7 @@ from gsi_fetcher import GsiFetcher
 GREEN, ACTIVE, BURNED, DILUTED, RIVER = 0, 1, 2, 3, 4
 
 class SIRCellularAutomataSimple:
-    def __init__(self, grid_size=200, infection_probability=0.58, recovery_time=217, cell_size_m=10, 
+    def __init__(self, grid_size=200, infection_probability=0.058, recovery_time=217, cell_size_m=10, 
                  terrain_mode="DUMMY", csv_filepath_elev=None, csv_filepath_vege=None, base_lat=None, base_lon=None):
 
         self.grid_size = grid_size
@@ -233,7 +233,7 @@ if __name__ == '__main__':
     # --- 共通のシミュレーション設定 ---
     sim_params = {
         "grid_size": 200,
-        "infection_probability": 0.58,
+        "infection_probability": 0.058,
         "recovery_time": 217,
         "cell_size_m": 10
     }
