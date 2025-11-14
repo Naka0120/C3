@@ -5,7 +5,9 @@
 ・ForestFire_Auto.py 実行でシミュレーションスタート <br>
 ・cells セル情報 <br>
 ・gsi_fetcher 国土地理院のAPIを使って地形情報を得る <br>
-・update_grid セルのアップデート
+・update_grid セルのアップデート <br>
+・1セルのサイズ10m <br>
+・1タイムステップ6秒
 
 ### water fire
 消火シミュレーション
