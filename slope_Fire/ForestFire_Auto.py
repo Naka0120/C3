@@ -4,7 +4,7 @@ import math
 import os # osモジュールをインポート
 from matplotlib.colors import ListedColormap
 from matplotlib.widgets import Button
-from update_grid import GridUpdater
+from update_grid_fast import GridUpdater
 from cells import Cell
 from gsi_fetcher import GsiFetcher
 

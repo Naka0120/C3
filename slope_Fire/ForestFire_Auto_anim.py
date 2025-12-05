@@ -10,7 +10,7 @@ if __name__ == '__main__':
     TERRAIN_MODE = "CSV"  # "DUMMY", "CSV", "API" から選択
     sim_params = {
         "grid_size": 200,
-        "infection_probability": 0.58,
+        "infection_probability": 0.058,
         "recovery_time": 217,
         "cell_size_m": 10
     }
@@ -84,10 +84,10 @@ if __name__ == '__main__':
 
     plt.close(fig)
     print("GIF動画を保存中...")
-    imageio.mimsave("forestfire_simulation_chile_rev.gif", frames, fps=10)
-    print("forestfire_simulation_chile_rev.gif を保存しました。")
+    imageio.mimsave("forestfire_simulation_chile_rev_1114.gif", frames, fps=10)
+    print("forestfire_simulation_chile_rev_1114.gif を保存しました。")
     print("MP4動画を保存中...")
-    with imageio.get_writer("forestfire_simulation_chile_rev.mp4", fps=10, codec='libx264') as writer:
+    with imageio.get_writer("forestfire_simulation_chile_1114.mp4", fps=10, codec='libx264') as writer:
         for frame in frames:
             writer.append_data(frame)
-    print("forestfire_simulation_chile_rev.mp4 を保存しました。")
+    print("forestfire_simulation_chile_1114.mp4 を保存しました。")

@@ -17,7 +17,7 @@ class SIRCellularAutomataInteractive:
     is_drawing = False  # ドラッグ中かどうか
     ACTIVE_THRESHOLD = 50  # ACTIVEセルがこの数を超えたら水設置可能
     
-    def __init__(self, grid_size=200, infection_probability=0.58, recovery_time=217, cell_size_m=10, 
+    def __init__(self, grid_size=200, infection_probability=0.058, recovery_time=217, cell_size_m=10, 
                  terrain_mode="DUMMY", csv_filepath_elev=None, csv_filepath_vege=None, base_lat=None, base_lon=None):
 
         self.grid_size = grid_size
@@ -357,7 +357,7 @@ if __name__ == '__main__':
 
     sim_params = {
         "grid_size": 200,
-        "infection_probability": 0.58,
+        "infection_probability": 0.058,
         "recovery_time": 217,
         "cell_size_m": 10
     }
