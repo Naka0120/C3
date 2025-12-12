@@ -8,7 +8,7 @@ from matplotlib.widgets import Button
 from update_grid_numba import GridUpdater 
 # ★★★ -------------------------------- ★★★
 from cells import Cell
-# GsiFetcherはここではインポートしませんが、必要に応じて追加してください。
+from gsi_fetcher import GsiFetcher
 
 # --- 状態定数（WATERを追加） ---
 GREEN, ACTIVE, BURNED, DILUTED, RIVER, WATER = 0, 1, 2, 3, 4, 5
@@ -36,24 +36,67 @@ class SIRCellularAutomataInteractive:
         print(f"--- 地形モード: {terrain_mode} ---")
 
         if terrain_mode == "API":
-            # API処理をスキップしダミー値を設定
-            self.height_grid = np.full((grid_size, grid_size), 50.0, dtype=float) 
-        
+            if base_lat is None or base_lon is None:
+                raise ValueError("APIモードでは'base_lat'と'base_lon'の指定が必要です。")
+            fetcher = GsiFetcher(base_lat, base_lon, grid_size, cell_size_m)
+            self.height_grid = fetcher.fetch_elevation_grid()
+
         elif terrain_mode == "CSV":
-            # CSV処理をスキップしダミー値を設定
-            self.height_grid = np.array([[j*3 for j in range(grid_size)] for i in range(grid_size)], dtype=float)
-            self.vegetation_grid = np.full((grid_size, grid_size), 10.0, dtype=float) 
+            if csv_filepath_elev is None or not os.path.exists(csv_filepath_elev):
+                raise FileNotFoundError(f"CSVファイルが見つかりません: {csv_filepath_elev}")
+            print(f"標高CSVファイル '{csv_filepath_elev}' を読み込みます...")
+            self.height_grid = np.loadtxt(csv_filepath_elev, delimiter=',')
+            # 左右反転してから左に90度回転
+            # self.height_grid = np.fliplr(self.height_grid)
+            # self.height_grid = np.rot90(self.height_grid, k=1)  # 左に90度回転
+            # if self.height_grid.shape != (grid_size, grid_size):
+            #     raise ValueError(f"CSVのサイズ{self.height_grid.shape}がgrid_size({grid_size},{grid_size})と一致しません。")
+
+            if csv_filepath_vege is None or not os.path.exists(csv_filepath_vege):
+                raise FileNotFoundError(f"CSVファイルが見つかりません: {csv_filepath_vege}")
+            print(f"植生CSVファイル '{csv_filepath_vege}' を読み込みます...")
+            self.vegetation_grid = np.loadtxt(csv_filepath_vege, delimiter=',')
+            # self.vegetation_grid = np.fliplr(self.vegetation_grid)
+            # self.vegetation_grid = np.rot90(self.vegetation_grid, k=1)  # 左に90度回転
+            if self.height_grid.shape != (grid_size, grid_size):
+                raise ValueError(f"CSVのサイズ{self.height_grid.shape}がgrid_size({grid_size},{grid_size})と一致しません。")
+            if self.vegetation_grid.shape != (grid_size, grid_size):
+                raise ValueError(f"CSVのサイズ{self.vegetation_grid.shape}がgrid_size({grid_size},{grid_size})と一致しません。")
+
         elif terrain_mode == "DUMMY":
             self.height_grid = np.array([[j for j in range(grid_size)] for i in range(grid_size)], dtype=float)
         else:
              raise ValueError(f"無効な地形モードです: {terrain_mode}。'API', 'CSV', 'DUMMY'のいずれかを選択してください。")
         
-        # --- 植生と密度の設定 (ダミー) ---
-        center = grid_size // 2
-        sigma = grid_size / 4
-        x, y = np.meshgrid(np.arange(grid_size), np.arange(grid_size))
-        distance_sq = (x - center)**2 + (y - center)**2
-        self.density_grid = np.exp(-distance_sq / (2 * sigma**2))
+        # self.vegetation_gridの値に基づいてself.density_gridを設定
+        if terrain_mode == "CSV":
+            # 植生タイプに応じた密度マッピング
+            # チリ用
+            # veg_to_density = {
+            #     50.0: 0.00001,  # 水域, 市街地
+            #     40.0: 0.1,   # 荒地
+            #     30.0: 0.3,   # 草地
+            #     20.0: 0.6,   # 低木
+            #     10.0: 0.9,   # 樹林
+            # }
+
+            # USA用
+            # 植生CSVの値を0.0〜1.0に正規化してdensity_gridとする
+            veg = self.vegetation_grid.astype(float)
+            vmin = np.nanmin(veg)
+            vmax = np.nanmax(veg)
+            if vmax == vmin:
+                # 全要素が同じ値の場合は一律0.0に（必要なら別の値に変更）
+                self.density_grid = np.zeros_like(veg)
+            else:
+                self.density_grid = (veg - vmin) / (vmax - vmin)
+            # 数値の丸めや範囲外の値対策
+            self.density_grid = np.clip(self.density_grid, 0.0, 1.0)
+        else:
+            center = grid_size // 2
+            sigma = grid_size / 4
+            x, y = np.meshgrid(np.arange(grid_size), np.arange(grid_size))
+            distance_sq = (x - center)**2 + (y - center)**2
         
         # 密度が0.0001以下のセルをRIVER状態に設定
         self.state_grid = np.full((grid_size, grid_size), GREEN, dtype=np.int32)
@@ -344,7 +387,19 @@ class SIRCellularAutomataInteractive:
 # --- メイン処理 ---
 if __name__ == '__main__':
     
-    TERRAIN_MODE = "DUMMY"  # "DUMMY"で動作を確認してください
+    TERRAIN_MODE = "CSV"  # "DUMMY"で動作を確認してください
+
+    # APIモード用の地理空間設定
+    api_params = {
+        "base_lat": 34.776,
+        "base_lon": 135.252,
+    }
+
+    # CSVモード用のファイルパス設定
+    csv_params = {
+        "csv_filepath_elev": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\elevation_grid.csv",
+        "csv_filepath_vege": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\vegetation_grid.csv"
+    }
 
     sim_params = {
         "grid_size": 200,
@@ -353,16 +408,23 @@ if __name__ == '__main__':
         "cell_size_m": 10
     }
 
-    # ダミーモード用の設定のみを適用
     all_params = sim_params.copy()
     all_params["terrain_mode"] = TERRAIN_MODE
+
+    if TERRAIN_MODE == "API":
+        all_params.update(api_params)
+    elif TERRAIN_MODE == "CSV":
+        all_params.update(csv_params)
 
     # シミュレータのインスタンスを作成
     sir_ca = SIRCellularAutomataInteractive(**all_params)
     
     # 中央に火をつける
-    center = sim_params["grid_size"] // 2
-    sir_ca.grid[center, center].state = ACTIVE
+    # center = sim_params["grid_size"] // 2
+    # sir_ca.grid[center, center].state = ACTIVE
+
+    # 着火点に火をつける (指定必要)
+    sir_ca.grid[112, 103].state = ACTIVE
 
     # シミュレーション実行 (plt.show()はsimulate_interactive内で制御されます)
     sir_ca.simulate_interactive(500, None, None)
