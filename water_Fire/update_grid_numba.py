@@ -26,7 +26,7 @@ def update_grid_numba(
     # 必要な定数
     slope_factor = 0.078
     wind = 4.166
-    theta_w = 5 * math.pi / 4
+    theta_w = 7 * math.pi / 4
     c_1 = 0.045
     c_2 = 0.131
     
