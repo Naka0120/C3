@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import math
 import os
+import csv
 from matplotlib.colors import ListedColormap
 from matplotlib.widgets import Button
 # ★★★ ファイル名をupdate_grid_numbaに変更 ★★★
@@ -9,7 +10,6 @@ from update_grid_numba import GridUpdater
 # ★★★ -------------------------------- ★★★
 from cells import Cell
 from gsi_fetcher import GsiFetcher
-
 # --- 状態定数（WATERを追加） ---
 GREEN, ACTIVE, BURNED, DILUTED, RIVER, WATER = 0, 1, 2, 3, 4, 5
 
@@ -23,8 +23,13 @@ class SIRCellularAutomataInteractive:
     MAX_WATER_CELLS_PER_DRAG_STEP = 9   # 1回のイベントで設置できる最大セル数 (3x3=9セル)
     is_eligible_for_water = False
 
+    # --- 座標変換定数 (USA_Fire/L2F_inputmap.csvより導出) ---
+    GRID_ORIGIN_X = 521863
+    GRID_ORIGIN_Y = 3383228
+    GRID_RES = 44.835
+
     def __init__(self, grid_size=200, infection_probability=0.058, recovery_time=217, cell_size_m=10, 
-                 terrain_mode="DUMMY", csv_filepath_elev=None, csv_filepath_vege=None, base_lat=None, base_lon=None):
+                 terrain_mode="DUMMY", csv_filepath_elev=None, csv_filepath_vege=None, csv_filepath_ign=None, base_lat=None, base_lon=None):
 
         self.grid_size = grid_size
         self.infection_probability = infection_probability
@@ -62,6 +67,15 @@ class SIRCellularAutomataInteractive:
                 raise ValueError(f"CSVのサイズ{self.height_grid.shape}がgrid_size({grid_size},{grid_size})と一致しません。")
             if self.vegetation_grid.shape != (grid_size, grid_size):
                 raise ValueError(f"CSVのサイズ{self.vegetation_grid.shape}がgrid_size({grid_size},{grid_size})と一致しません。")
+
+            # 着火点データの読み込み
+            self.ignition_events = {}
+            if csv_filepath_ign and os.path.exists(csv_filepath_ign):
+                print(f"着火点CSVファイル '{csv_filepath_ign}'を読み込みます...")
+                self.load_ignition_data(csv_filepath_ign)
+            else:
+                print("着火点CSVファイルが指定されていないか見つかりません。動的着火は無効です。")
+
 
         elif terrain_mode == "DUMMY":
             self.height_grid = np.array([[j for j in range(grid_size)] for i in range(grid_size)], dtype=float)
@@ -135,6 +149,66 @@ class SIRCellularAutomataInteractive:
         self.grid_updater = GridUpdater(self.params)
 
     # active_functionはGridUpdaterクラスの静的メソッドとして定義されているため、ここでは削除
+
+    def load_ignition_data(self, filepath):
+        """
+        ignition_synced_wide.csvを読み込み、タイムステップごとの着火点リストを作成する。
+        self.ignition_events = { time_step: [(r, c), ...], ... }
+        """
+        try:
+            with open(filepath, 'r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        elapsed_sec = float(row['Elapsed_Sec'])
+                        time_step = int(elapsed_sec/6) # 6秒を1ステップとして扱う想定
+                        
+                        points = []
+                        # Ign1_X, Ign1_Y から Ign10_X, Ign10_Y くらいまであると想定してループ、あるいは列名固定
+                        # CSVには 'Ign1_X', 'Ign1_Y', 'Ign2_X', ... がある
+                        
+                        # 存在する全てのIgnカラムを探索
+                        i = 1
+                        while True:
+                            col_x = f'Ign{i}_X'
+                            col_y = f'Ign{i}_Y'
+                            if col_x not in row or col_y not in row:
+                                break
+                            
+                            val_x = row[col_x]
+                            val_y = row[col_y]
+                            
+                            if val_x and val_y: # 空でなければ
+                                try:
+                                    utm_x = float(val_x)
+                                    utm_y = float(val_y)
+                                    
+                                    # UTM -> Grid Index 変換
+                                    # col = (utm_x - origin_x) / res
+                                    # row = (origin_y - utm_y) / res  (Yは北がプラス、行インデックスは下が増加なので反転...
+                                    #  通常グリッド画像は上が行0。地図座標Yは上が大きい。
+                                    #  したがって origin_y からの差分を res で割るのが一般的)
+                                    
+                                    c = int((utm_x - self.GRID_ORIGIN_X) / self.GRID_RES)
+                                    r = int((self.GRID_ORIGIN_Y - utm_y) / self.GRID_RES)
+                                    
+                                    if 0 <= r < self.grid_size and 0 <= c < self.grid_size:
+                                        points.append((r, c))
+                                except ValueError:
+                                    pass
+                            i += 1
+                        
+                        if points:
+                            if time_step not in self.ignition_events:
+                                self.ignition_events[time_step] = []
+                            self.ignition_events[time_step].extend(points)
+
+                    except ValueError:
+                        continue
+            print(f"着火データを読み込みました: {len(self.ignition_events)} タイムステップ分のイベント")
+            
+        except Exception as e:
+            print(f"着火データの読み込みに失敗しました: {e}")
 
     def get_neighbors(self, i, j):
         """Cellオブジェクトグリッド用の8近傍取得（numba関数では使用されないが、CellオブジェクトからState_gridに状態を反映するために残す）"""
@@ -315,10 +389,25 @@ class SIRCellularAutomataInteractive:
         for t in range(t_end):
             self.current_step = t
             if not SIRCellularAutomataInteractive.is_paused:
+                # 動的着火判定
+                if hasattr(self, 'ignition_events') and t in self.ignition_events:
+                    for (r, c) in self.ignition_events[t]:
+                        if self.grid[r, c].state != ACTIVE and self.grid[r, c].state != BURNED and self.grid[r, c].state != RIVER:
+                             self.grid[r, c].state = ACTIVE
+                             self.state_grid[r, c] = ACTIVE # state_gridも同期
+                             self.infection_time[r, c] = 0
+                             print(f"Time {t}: Ignition at ({r}, {c})")
+
                 self.update_grid()
-                self.visualize(t, t_end, self.ax1)
+                
+                # 描画間隔を調整 (10ステップに1回)
+                if t % 10 == 0:
+                    self.visualize(t, t_end, self.ax1)
             
-            plt.pause(0.05) # 描画更新間隔
+            # plt.pause(0.05) # 描画更新間隔 -> 不要または短くする
+            if t % 10 == 0:
+                 plt.pause(0.01)
+
             if not plt.get_fignums(): # ウィンドウが閉じられたら終了
                 break
 
@@ -398,7 +487,8 @@ if __name__ == '__main__':
     # CSVモード用のファイルパス設定
     csv_params = {
         "csv_filepath_elev": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\elevation_grid.csv",
-        "csv_filepath_vege": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\vegetation_grid.csv"
+        "csv_filepath_vege": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\vegetation_grid.csv",
+        "csv_filepath_ign": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\ignition_synced_wide.csv"
     }
 
     sim_params = {
@@ -424,7 +514,8 @@ if __name__ == '__main__':
     # sir_ca.grid[center, center].state = ACTIVE
 
     # 着火点に火をつける (指定必要)
-    sir_ca.grid[112, 103].state = ACTIVE
+    # sir_ca.grid[112, 103].state = ACTIVE -> 動的着火に移行するためコメントアウト
+
 
     # シミュレーション実行 (plt.show()はsimulate_interactive内で制御されます)
     sir_ca.simulate_interactive(500, None, None)

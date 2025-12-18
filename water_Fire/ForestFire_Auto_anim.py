@@ -1,56 +1,444 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import math
+import os
+import csv
 from matplotlib.colors import ListedColormap
-from tqdm import tqdm
+from matplotlib.widgets import Button
 import imageio
-from ForestFire_Auto import SIRCellularAutomataSimple, GREEN, ACTIVE, BURNED, DILUTED, RIVER
+# ★★★ ファイル名をupdate_grid_numbaに変更 ★★★
+from update_grid_numba import GridUpdater 
+# ★★★ -------------------------------- ★★★
+from cells import Cell
+from gsi_fetcher import GsiFetcher
 
-if __name__ == '__main__':
-    # --- シミュレーション設定 ---
-    TERRAIN_MODE = "CSV"  # "DUMMY", "CSV", "API" から選択
-    sim_params = {
-        "grid_size": 200,
-        "infection_probability": 0.58,
-        "recovery_time": 217,
-        "cell_size_m": 10
-    }
-    api_params = {
-        "base_lat": 34.776,
-        "base_lon": 135.252,
-    }
-    csv_params = {
-        "csv_filepath_elev": "C:\\Users\\souta\\AppData\\Roaming\\Code\\sorcecode\\C_Cube\\slope_Fire\\Chiri_Fire\\elevation_grid.csv",
-        "csv_filepath_vege": "C:\\Users\\souta\\AppData\\Roaming\\Code\\sorcecode\\C_Cube\\slope_Fire\\Chiri_Fire\\vegetation_grid.csv"
-    }
-    all_params = sim_params.copy()
-    all_params["terrain_mode"] = TERRAIN_MODE
-    if TERRAIN_MODE == "API":
-        all_params.update(api_params)
-    elif TERRAIN_MODE == "CSV":
-        all_params.update(csv_params)
+# --- 状態定数（WATERを追加） ---
+GREEN, ACTIVE, BURNED, DILUTED, RIVER, WATER = 0, 1, 2, 3, 4, 5
 
-    sir_ca = SIRCellularAutomataSimple(**all_params)
-    center = sim_params["grid_size"] // 2
-    sir_ca.grid[center, center].state = ACTIVE
+class SIRCellularAutomataInteractive:
+    # --- UI関連のクラス変数 ---
+    is_paused = False
+    water_mode_active = False
+    active_threshold_reached = False
+    is_drawing = False  # ドラッグ中かどうか
+    ACTIVE_THRESHOLD = 50  # ACTIVEセルがこの数を超えたら水設置可能
+    MAX_WATER_CELLS_PER_DRAG_STEP = 9   # 1回のイベントで設置できる最大セル数 (3x3=9セル)
+    is_eligible_for_water = False
 
-    t_end = 500
-    frames = []
-    cmap = ListedColormap([
-        '#e0ffe0', '#80ff80', '#00cc44', '#006622', # GREEN (密度4段階)
-        '#8B0000', '#DC143C', '#FF5050',           # ACTIVE (燃焼強度3段階)
-        '#646464',                                 # BURNED
-        'deepskyblue'                              # RIVER
-    ])
+    # --- 座標変換定数 (USA_Fire/L2F_inputmap.csvより導出) ---
+    GRID_ORIGIN_X = 521863
+    GRID_ORIGIN_Y = 3383228
+    GRID_RES = 44.835
 
-    fig, ax = plt.subplots(figsize=(8, 8))
-    plt.axis('off')
+    def __init__(self, grid_size=200, infection_probability=0.058, recovery_time=217, cell_size_m=10, 
+                 terrain_mode="DUMMY", csv_filepath_elev=None, csv_filepath_vege=None, csv_filepath_ign=None, base_lat=None, base_lon=None):
 
-    print("シミュレーションとフレーム生成を開始します...")
-    for t in tqdm(range(t_end), desc="進行状況", ncols=80):
-        sir_ca.update_grid()
-        color_grid = np.zeros((sir_ca.grid_size, sir_ca.grid_size), dtype=int)
-        is_green = sir_ca.state_grid == GREEN
-        density_on_green = sir_ca.density_grid[is_green]
+        self.grid_size = grid_size
+        self.infection_probability = infection_probability
+        self.recovery_time = recovery_time
+        self.cell_size_m = cell_size_m
+        self.current_step = 0
+
+        # --- 地形情報の準備 (ダミーのみ) ---
+        print(f"--- 地形モード: {terrain_mode} ---")
+
+        if terrain_mode == "API":
+            if base_lat is None or base_lon is None:
+                raise ValueError("APIモードでは'base_lat'と'base_lon'の指定が必要です。")
+            fetcher = GsiFetcher(base_lat, base_lon, grid_size, cell_size_m)
+            self.height_grid = fetcher.fetch_elevation_grid()
+
+        elif terrain_mode == "CSV":
+            if csv_filepath_elev is None or not os.path.exists(csv_filepath_elev):
+                raise FileNotFoundError(f"CSVファイルが見つかりません: {csv_filepath_elev}")
+            print(f"標高CSVファイル '{csv_filepath_elev}' を読み込みます...")
+            self.height_grid = np.loadtxt(csv_filepath_elev, delimiter=',')
+            # 左右反転してから左に90度回転
+            # self.height_grid = np.fliplr(self.height_grid)
+            # self.height_grid = np.rot90(self.height_grid, k=1)  # 左に90度回転
+            # if self.height_grid.shape != (grid_size, grid_size):
+            #     raise ValueError(f"CSVのサイズ{self.height_grid.shape}がgrid_size({grid_size},{grid_size})と一致しません。")
+
+            if csv_filepath_vege is None or not os.path.exists(csv_filepath_vege):
+                raise FileNotFoundError(f"CSVファイルが見つかりません: {csv_filepath_vege}")
+            print(f"植生CSVファイル '{csv_filepath_vege}' を読み込みます...")
+            self.vegetation_grid = np.loadtxt(csv_filepath_vege, delimiter=',')
+            # self.vegetation_grid = np.fliplr(self.vegetation_grid)
+            # self.vegetation_grid = np.rot90(self.vegetation_grid, k=1)  # 左に90度回転
+            if self.height_grid.shape != (grid_size, grid_size):
+                raise ValueError(f"CSVのサイズ{self.height_grid.shape}がgrid_size({grid_size},{grid_size})と一致しません。")
+            if self.vegetation_grid.shape != (grid_size, grid_size):
+                raise ValueError(f"CSVのサイズ{self.vegetation_grid.shape}がgrid_size({grid_size},{grid_size})と一致しません。")
+
+            # 着火点データの読み込み
+            self.ignition_events = {}
+            if csv_filepath_ign and os.path.exists(csv_filepath_ign):
+                print(f"着火点CSVファイル '{csv_filepath_ign}'を読み込みます...")
+                self.load_ignition_data(csv_filepath_ign)
+            else:
+                print("着火点CSVファイルが指定されていないか見つかりません。動的着火は無効です。")
+
+
+        elif terrain_mode == "DUMMY":
+            self.height_grid = np.array([[j for j in range(grid_size)] for i in range(grid_size)], dtype=float)
+        else:
+             raise ValueError(f"無効な地形モードです: {terrain_mode}。'API', 'CSV', 'DUMMY'のいずれかを選択してください。")
+        
+        # self.vegetation_gridの値に基づいてself.density_gridを設定
+        if terrain_mode == "CSV":
+            # 植生タイプに応じた密度マッピング
+            # チリ用
+            # veg_to_density = {
+            #     50.0: 0.00001,  # 水域, 市街地
+            #     40.0: 0.1,   # 荒地
+            #     30.0: 0.3,   # 草地
+            #     20.0: 0.6,   # 低木
+            #     10.0: 0.9,   # 樹林
+            # }
+
+            # USA用
+            # 植生CSVの値を0.0〜1.0に正規化してdensity_gridとする
+            veg = self.vegetation_grid.astype(float)
+            vmin = np.nanmin(veg)
+            vmax = np.nanmax(veg)
+            if vmax == vmin:
+                # 全要素が同じ値の場合は一律0.0に（必要なら別の値に変更）
+                self.density_grid = np.zeros_like(veg)
+            else:
+                self.density_grid = (veg - vmin) / (vmax - vmin)
+            # 数値の丸めや範囲外の値対策
+            self.density_grid = np.clip(self.density_grid, 0.0, 1.0)
+        else:
+            center = grid_size // 2
+            sigma = grid_size / 4
+            x, y = np.meshgrid(np.arange(grid_size), np.arange(grid_size))
+            distance_sq = (x - center)**2 + (y - center)**2
+        
+        # 密度が0.0001以下のセルをRIVER状態に設定
+        self.state_grid = np.full((grid_size, grid_size), GREEN, dtype=np.int32)
+        river_mask = self.density_grid <= 0.0001
+        self.state_grid[river_mask] = RIVER
+
+        self.infection_time = np.zeros((grid_size, grid_size), dtype=np.int32)
+        
+        # --- WATERのライフサイクル管理（タイマーと元状態を保持）---
+        self.water_timer = np.zeros((grid_size, grid_size), dtype=np.int32)           # WATER設置からの経過ステップ
+        self.water_prev_state = np.full((grid_size, grid_size), -1, dtype=np.int32)   # WATERを置いた時の元状態を保持
+        # デフォルトの経過ステップ（2ステップ後に消滅）
+        self.WATER_ON_ACTIVE_DURATION = 2   # ACTIVE上のWATERがこのステップ数経過でBURNEDに変化
+        self.WATER_ON_GREEN_DURATION = 2   # GREEN上のWATERがこのステップ数経過で再びGREENに戻る
+        self.WATER_ON_BURNED_DURATION = 2   # BURNED上のWATERがこのステップ数経過で再びBURNEDに戻る
+
+        # --- Cellオブジェクトグリッドの生成 --- 
+        self.grid = np.empty((grid_size, grid_size), dtype=object)
+        for i in range(grid_size):
+            for j in range(grid_size):
+                self.grid[i, j] = Cell(
+                    state=self.state_grid[i, j],
+                    height=self.height_grid[i, j],
+                    density=self.density_grid[i, j]
+                )
+
+        # --- GridUpdaterの準備 ---
+        self.params = {
+            'GREEN': GREEN,
+            'ACTIVE': ACTIVE,
+            'BURNED': BURNED,
+            'DILUTED': DILUTED,
+            'RIVER': RIVER,
+            'WATER': WATER # 新しい状態を追加
+        }
+        self.grid_updater = GridUpdater(self.params)
+
+    # active_functionはGridUpdaterクラスの静的メソッドとして定義されているため、ここでは削除
+
+    def load_ignition_data(self, filepath):
+        """
+        ignition_synced_wide.csvを読み込み、タイムステップごとの着火点リストを作成する。
+        self.ignition_events = { time_step: [(r, c), ...], ... }
+        """
+        try:
+            with open(filepath, 'r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        elapsed_sec = float(row['Elapsed_Sec'])
+                        time_step = int(elapsed_sec / 6) # 6秒を1ステップとして扱う
+                        
+                        points = []
+                        i = 1
+                        while True:
+                            col_x = f'Ign{i}_X'
+                            col_y = f'Ign{i}_Y'
+                            if col_x not in row or col_y not in row:
+                                break
+                            
+                            val_x = row[col_x]
+                            val_y = row[col_y]
+                            
+                            if val_x and val_y: # 空でなければ
+                                try:
+                                    utm_x = float(val_x)
+                                    utm_y = float(val_y)
+                                    
+                                    c = int((utm_x - self.GRID_ORIGIN_X) / self.GRID_RES)
+                                    r = int((self.GRID_ORIGIN_Y - utm_y) / self.GRID_RES)
+                                    
+                                    if 0 <= r < self.grid_size and 0 <= c < self.grid_size:
+                                        points.append((r, c))
+                                except ValueError:
+                                    pass
+                            i += 1
+                        
+                        if points:
+                            if time_step not in self.ignition_events:
+                                self.ignition_events[time_step] = []
+                            self.ignition_events[time_step].extend(points)
+
+                    except ValueError:
+                        continue
+            print(f"着火データを読み込みました: {len(self.ignition_events)} タイムステップ分のイベント")
+            
+        except Exception as e:
+            print(f"着火データの読み込みに失敗しました: {e}")
+
+    def get_neighbors(self, i, j):
+        """Cellオブジェクトグリッド用の8近傍取得（numba関数では使用されないが、CellオブジェクトからState_gridに状態を反映するために残す）"""
+        directions = [
+            (-1,  0, "North"), (-1,  1, "North-East"), (0,  1, "East"), (1,  1, "South-East"),
+            (1,  0, "South"), (1, -1, "South-West"), (0, -1, "West"), (-1, -1, "North-West")
+        ]
+        neighbors = []
+        for di, dj, dname in directions:
+            ni, nj = i + di, j + dj
+            if 0 <= ni < self.grid_size and 0 <= nj < self.grid_size:
+                neighbors.append((self.grid[ni, nj], dname))
+        return neighbors
+
+    def update_grid(self):
+        # ACTIVEセルの数をチェックし、閾値を超えていたらフラグを立てる
+        if not self.active_threshold_reached:
+            active_count = np.sum(self.state_grid == ACTIVE)
+            if active_count >= self.ACTIVE_THRESHOLD:
+                self.active_threshold_reached = True
+                print(f"\n🔥🔥🔥 **火災が深刻化: ACTIVEセルが{self.ACTIVE_THRESHOLD}個を超えました！** 🔥🔥🔥")
+                print("--- '水設置モード'ボタンが有効化されました。---")
+
+        # Cellオブジェクトグリッドを更新 (numbaで高速化された処理)
+        self.grid, self.infection_time = self.grid_updater.update_grid(
+            self.grid,
+            self.infection_time,
+            self.get_neighbors,
+            self.recovery_time,
+            self.infection_probability,
+            self.cell_size_m
+        )
+
+        # --- ★★★ 水の消滅ロジックをNumPy操作で高速化 ★★★ ---
+        
+        # 1. WATERタイマーをインクリメント
+        water_mask = (self.state_grid == WATER)
+        self.water_timer[water_mask] += 1
+        
+        # 2. ACTIVE -> BURNED への遷移判定 (2ステップ後)
+        active_to_burned_mask = (self.water_prev_state == ACTIVE) & (self.water_timer >= self.WATER_ON_ACTIVE_DURATION)
+        
+        # 3. GREEN -> GREEN への遷移判定 (2ステップ後)
+        green_to_green_mask = (self.water_prev_state == GREEN) & (self.water_timer >= self.WATER_ON_GREEN_DURATION)
+        
+        # 4. BURNED-> BURNED への遷移判定 (2ステップ後)
+        burned_to_burned_mask = (self.water_prev_state == BURNED) & (self.water_timer >= self.WATER_ON_BURNED_DURATION)
+
+        # 5. 状態を更新
+        self.state_grid[active_to_burned_mask] = BURNED
+        self.state_grid[green_to_green_mask] = GREEN
+        self.state_grid[burned_to_burned_mask] = BURNED
+
+        # 6. Cellオブジェクトの状態とタイマーをリセット
+        reset_mask = active_to_burned_mask | green_to_green_mask
+        self.water_timer[reset_mask] = 0
+        self.water_prev_state[reset_mask] = -1
+        
+        # Cellオブジェクトの状態をstate_gridの最終結果に同期
+        i_coords, j_coords = np.where(reset_mask)
+        for i, j in zip(i_coords, j_coords):
+            self.grid[i, j].state = self.state_grid[i, j]
+        
+        # --- ★★★ 水の消滅ロジックをNumPy操作で高速化完了 ★★★ ---
+
+        # GridUpdaterで更新された状態をstate_gridに完全に反映（水消滅処理後のCell状態も含む）
+        # NOTE: GridUpdater後のCell状態は既に更新されているが、水消滅処理でstate_gridが更新されているため、
+        # Cell状態をstate_gridの最終結果に同期させる必要あり (上記5.で完了している)
+
+        # 念のため、GridUpdaterで更新された全セルをstate_gridに反映
+        for i in range(self.grid_size):
+            for j in range(self.grid_size):
+                self.state_grid[i, j] = self.grid[i, j].state
+
+
+    # --- UI/インタラクション関連 ---
+    def toggle_pause(self, event):
+        """シミュレーションの一時停止/再開を切り替える"""
+        SIRCellularAutomataInteractive.is_paused = not SIRCellularAutomataInteractive.is_paused
+        print(f"シミュレーション: {'一時停止中' if SIRCellularAutomataInteractive.is_paused else '再開'}")
+        self.pause_button.label.set_text('Restart' if SIRCellularAutomataInteractive.is_paused else 'Pause')
+
+    def toggle_water_mode(self, event):
+        """水設置モードの切り替え"""
+        if not self.active_threshold_reached:
+            print(f"⚠️ **火災規模が小さすぎます。ACTIVEセルが{self.ACTIVE_THRESHOLD}個を超えるまで待ってください。** ⚠️")
+            return
+            
+        SIRCellularAutomataInteractive.water_mode_active = not SIRCellularAutomataInteractive.water_mode_active
+        print(f"水設置モード: {'ON (click/drag)' if SIRCellularAutomataInteractive.water_mode_active else 'OFF'}")
+        self.water_button.label.set_text(
+            'water (OFF)' if SIRCellularAutomataInteractive.water_mode_active else 'water (ON)'
+        )
+
+    # 水設置ロジックを分離
+    def place_water(self, event):
+        """マウスイベントに基づいてセルに水を設置する"""
+        if SIRCellularAutomataInteractive.water_mode_active and event.xdata is not None and event.ydata is not None:
+            j = int(round(event.xdata))
+            i = int(round(event.ydata))
+
+            if 0 <= i < self.grid_size and 0 <= j < self.grid_size:
+                # 水を設置（例：3x3の範囲）
+                water_placed = False
+                for di in [-1, 0, 1]:
+                    for dj in [-1, 0, 1]:
+                        ni, nj = i + di, j + dj
+                        if 0 <= ni < self.grid_size and 0 <= nj < self.grid_size:
+                            # 樹木、火災、燃え跡のセルのみを水に変換（川はそのまま）
+                            prev = self.grid[ni, nj].state
+                            if prev == ACTIVE:
+                                t = self.infection_time[ni, nj]
+                                n = self.recovery_time
+                                if t <= 0.2 * n:  # 消火可能なACTIVEセルのみ
+                                    is_eligible_for_water = True
+
+                            if is_eligible_for_water:
+                                # 元状態を記録してタイマーをリセット
+                                self.grid[ni, nj].state = WATER
+                                self.water_timer[ni, nj] = 0
+                                self.water_prev_state[ni, nj] = prev
+                                water_placed = True
+                
+                # 描画を強制更新
+                if water_placed:
+                    self.state_grid_update_from_grid()
+                    self.visualize(self.current_step, 0, self.ax1)
+                    self.fig.canvas.draw_idle()
+
+    def onclick(self, event):
+        """マウスボタンが押されたときにドラッグを開始し、水を設置する"""
+        if SIRCellularAutomataInteractive.water_mode_active and event.button == 1: # 左クリックのみ
+            SIRCellularAutomataInteractive.is_drawing = True
+            self.place_water(event) # 押し始めの1点を設置
+
+    def onrelease(self, event):
+        """マウスボタンが離されたときにドラッグを終了する"""
+        if event.button == 1:
+            SIRCellularAutomataInteractive.is_drawing = False
+
+    def on_motion(self, event):
+        """ドラッグ中にマウスが移動したときに水を連続設置する"""
+        if SIRCellularAutomataInteractive.is_drawing:
+            self.place_water(event)
+
+
+    def state_grid_update_from_grid(self):
+        """Cellオブジェクトグリッドからstate_gridを更新する"""
+        for i in range(self.grid_size):
+            for j in range(self.grid_size):
+                self.state_grid[i, j] = self.grid[i, j].state
+    
+    # --- シミュレーション実行 ---
+    def simulate_interactive(self, t_end, ax1, ax3):
+        self.fig, self.ax1 = plt.subplots(1, 2, figsize=(15, 7))
+        self.ax3 = self.ax1[1]
+        self.ax1 = self.ax1[0]
+        self.fig.suptitle(f'Forest Fire Simulation: Water Threshold={self.ACTIVE_THRESHOLD}', fontsize=16)
+
+        self.visualize_heatmap(self.ax3)
+        self.visualize(0, t_end, self.ax1) # 初回描画
+
+        # UIボタンの設定
+        ax_pause = self.fig.add_axes([0.1, 0.01, 0.1, 0.04]) # [left, bottom, width, height]
+        self.pause_button = Button(ax_pause, 'Pause')
+        self.pause_button.on_clicked(self.toggle_pause)
+
+        ax_water = self.fig.add_axes([0.22, 0.01, 0.15, 0.04])
+        self.water_button = Button(ax_water, 'Water (ON)')
+        self.water_button.on_clicked(self.toggle_water_mode)
+        
+        # マウスイベントを接続
+        self.fig.canvas.mpl_connect('button_press_event', self.onclick)    # 押す
+        self.fig.canvas.mpl_connect('button_release_event', self.onrelease)  # 離す
+        self.fig.canvas.mpl_connect('motion_notify_event', self.on_motion)  # 移動
+
+        
+        for t in range(t_end):
+            self.current_step = t
+            if not SIRCellularAutomataInteractive.is_paused:
+                self.update_grid()
+                self.visualize(t, t_end, self.ax1)
+            
+            plt.pause(0.05) # 描画更新間隔
+            if not plt.get_fignums(): # ウィンドウが閉じられたら終了
+                break
+
+    def simulate_and_save_gif(self, t_end, filename="forestfire_simulation_usa.gif", fps=10):
+        """非インタラクティブでシミュレーションを実行し、GIFファイルとして保存する"""
+        fig, ax = plt.subplots(figsize=(8, 8))
+        ax.set_xticks([]); ax.set_yticks([])
+        frames = []
+        
+        print(f"シミュレーションを開始します (GIF出力、間隔=2ステップ)...")
+        for t in range(t_end):
+            # 動的着火判定
+            if hasattr(self, 'ignition_events') and t in self.ignition_events:
+                for (r, c) in self.ignition_events[t]:
+                    if self.grid[r, c].state != ACTIVE and self.grid[r, c].state != BURNED and self.grid[r, c].state != RIVER:
+                            self.grid[r, c].state = ACTIVE
+                            self.state_grid[r, c] = ACTIVE # state_gridも同期
+                            self.infection_time[r, c] = 0
+                            # print(f"Time {t}: Ignition at ({r}, {c})")
+
+            self.update_grid()
+            
+            # 描画間隔を2ステップごとに設定
+            if t % 2 == 0:
+                self.visualize(t, t_end, ax)
+                fig.canvas.draw()
+                image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
+                image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+                frames.append(image)
+
+        plt.close(fig)
+        print(f"GIF動画を保存中... ({filename})")
+        # imageioでGIF保存 (loop=0 for infinite loop)
+        imageio.mimsave(filename, frames, fps=fps, loop=0)
+        print(f"{filename} を保存しました。")
+
+    # --- 可視化 ---
+    def visualize(self, time_step, t_end, ax1):
+        # 描画の高速化のため、ここではax1.clear()を残す安定版を採用
+        ax1.clear() 
+        # カラーマップを定義 (GREEN4段階 + ACTIVE3段階 + BURNED + RIVER + WATER)
+        cmap = ListedColormap([
+            '#e0ffe0', '#80ff80', '#00cc44', '#006622', # GREEN (密度4段階) -> Index 0-3
+            '#8B0000', '#DC143C', '#FF5050',           # ACTIVE (燃焼強度3段階) -> Index 4-6
+            '#646464',                                 # BURNED -> Index 7
+            'deepskyblue',                             # RIVER -> Index 8
+            'cyan'                                     # WATER -> Index 9
+        ])
+        
+        color_grid = np.zeros((self.grid_size, self.grid_size), dtype=int)
+        
+        # GREENセルの色を密度に応じて設定 (Index 0-3)
+        is_green = self.state_grid == GREEN
+        density_on_green = self.density_grid[is_green]
         conditions = [
             density_on_green < 0.25,
             density_on_green < 0.5,
@@ -59,35 +447,87 @@ if __name__ == '__main__':
         ]
         choices = [0, 1, 2, 3]
         color_grid[is_green] = np.select(conditions, choices)
-        color_grid[sir_ca.state_grid == BURNED] = 7
-        color_grid[sir_ca.state_grid == RIVER] = 8
-        active_coords = np.argwhere(sir_ca.state_grid == ACTIVE)
+        
+        # BURNEDセル (Index 7)
+        color_grid[self.state_grid == BURNED] = 7
+        # RIVERセル (Index 8)
+        color_grid[self.state_grid == RIVER] = 8
+        # WATERセル (Index 9)
+        color_grid[self.state_grid == WATER] = 9
+
+        # ACTIVEセルの色を燃焼時間に応じて設定 (Index 4-6)
+        active_coords = np.argwhere(self.state_grid == ACTIVE)
         for i, j in active_coords:
-            tt = sir_ca.infection_time[i, j]
-            n = sir_ca.recovery_time
-            burn_intensity = sir_ca.active_function(tt, n)
-            if burn_intensity > 0.66:
-                color_grid[i, j] = 4
-            elif burn_intensity > 0.33:
-                color_grid[i, j] = 5
+            t = self.infection_time[i, j]
+            n = self.recovery_time
+            # 時間によって色を変える
+            if t <= 0.2*n:
+                color_grid[i, j] = 6 # 明るい赤(消火可能)
+            elif t > 0.8*n:
+                color_grid[i, j] = 4 # 暗いの赤(もうすぐ消える)
             else:
-                color_grid[i, j] = 6
-        ax.imshow(color_grid, cmap=cmap, vmin=0, vmax=8)
-        ax.set_title(f"Step {t+1}")
-        fig.canvas.draw()
-        image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
-        image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-        frames.append(image)
+                color_grid[i, j] = 5 # 中間の赤(消火不可)
+
+        ax1.imshow(color_grid, cmap=cmap, vmin=0, vmax=9)
+        ax1.set_title(f"Fire Spread at Time: {time_step + 1} | Water Mode: {'ON' if self.water_mode_active else 'OFF'}")
+        ax1.set_xticks([]); ax1.set_yticks([]) # 軸の表示をオフ
+
+    def visualize_heatmap(self, ax):
+        """標高のヒートマップを指定された軸(ax)に描画する"""
         ax.clear()
-        plt.axis('off')
+        im = ax.imshow(self.height_grid, cmap='terrain')
+        ax.set_title("Elevation Heatmap (m)")
+        fig = ax.get_figure()
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label('Elevation (meters)')
+        ax.set_xticks([]); ax.set_yticks([]) # 軸の表示をオフ
 
 
-    plt.close(fig)
-    print("GIF動画を保存中...")
-    imageio.mimsave("forestfire_simulation_chile.gif", frames, fps=10)
-    print("forestfire_simulation_chile.gif を保存しました。")
-    print("MP4動画を保存中...")
-    with imageio.get_writer("forestfire_simulation_chile.mp4", fps=10, codec='libx264') as writer:
-        for frame in frames:
-            writer.append_data(frame)
-    print("forestfire_simulation_chile.mp4 を保存しました。")
+# --- メイン処理 ---
+if __name__ == '__main__':
+    
+    TERRAIN_MODE = "CSV"  # "DUMMY"で動作を確認してください
+
+    # APIモード用の地理空間設定
+    api_params = {
+        "base_lat": 34.776,
+        "base_lon": 135.252,
+    }
+
+    # CSVモード用のファイルパス設定 (ignitionを追加)
+    csv_params = {
+        "csv_filepath_elev": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\elevation_grid.csv",
+        "csv_filepath_vege": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\vegetation_grid.csv",
+        "csv_filepath_ign": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\ignition_synced_wide.csv"
+    }
+
+    sim_params = {
+        "grid_size": 200,
+        "infection_probability": 0.058,
+        "recovery_time": 217,
+        "cell_size_m": 10
+    }
+
+    all_params = sim_params.copy()
+    all_params["terrain_mode"] = TERRAIN_MODE
+
+    if TERRAIN_MODE == "API":
+        all_params.update(api_params)
+    elif TERRAIN_MODE == "CSV":
+        all_params.update(csv_params)
+
+    # シミュレータのインスタンスを作成
+    sir_ca = SIRCellularAutomataInteractive(**all_params)
+    
+    # 着火点初期化 (動的着火のみにするならコメントアウトだが、検証用に残すか判断。リクエストでは動的着火)
+    # sir_ca.grid[112, 103].state = ACTIVE
+
+    # GIF出力フラグ
+    EXPORT_GIF = True
+
+    if EXPORT_GIF:
+        # 非インタラクティブで実行してGIFとして保存
+        sir_ca.simulate_and_save_gif(500, filename="forestfire_simulation_usa.gif", fps=10)
+    else:
+        # インタラクティブ実行
+        sir_ca.simulate_interactive(500, None, None)
