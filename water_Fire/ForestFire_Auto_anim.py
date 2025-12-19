@@ -527,7 +527,7 @@ if __name__ == '__main__':
 
     if EXPORT_GIF:
         # 非インタラクティブで実行してGIFとして保存
-        sir_ca.simulate_and_save_gif(500, filename="forestfire_simulation_usa.gif", fps=10)
+        sir_ca.simulate_and_save_gif(320, filename="forestfire_simulation_usa.gif", fps=10)
     else:
         # インタラクティブ実行
-        sir_ca.simulate_interactive(500, None, None)
+        sir_ca.simulate_interactive(320, None, None)
