@@ -16,19 +16,21 @@ def update_grid_numba(
     state_grid_in, height_grid, density_grid, infection_time_in, 
     recovery_time, P_h, cell_size_m, 
     # 状態定数を引数として渡す
-    GREEN, ACTIVE, BURNED, DILUTED, RIVER, WATER 
+    GREEN, ACTIVE, BURNED, DILUTED, RIVER, WATER,
+    # 物理パラメータを引数として追加
+    slope_factor, wind, theta_w, c_1, c_2
 ):
     # 処理の高速化のため、グリッドをコピーして結果を格納する
     grid_size = state_grid_in.shape[0]
     new_state_grid = np.copy(state_grid_in)
     new_infection_time = np.copy(infection_time_in)
     
-    # 必要な定数
-    slope_factor = 0.078
-    wind = 4.166
-    theta_w = 7 * math.pi / 4
-    c_1 = 0.045
-    c_2 = 0.131
+    # 必要な定数 (引数から使用するため削除)
+    # slope_factor = 0.078
+    # wind = 4.166
+    # theta_w = 7 * math.pi / 4
+    # c_1 = 0.045
+    # c_2 = 0.131
     
     # 近傍の相対座標と方向の角度（theta_d）を事前に定義
     # (di, dj, theta_d_index)
@@ -118,10 +120,22 @@ def update_grid_numba(
 
 # GridUpdaterクラスは、numba関数を呼び出すためのラッパーとして残します
 class GridUpdater:
-    def __init__(self, params):
+    def __init__(self, params, config=None):
         self.params = params
-        # ACTIVE_RECOVERY_STEPS を計算するためのパラメータを保持
-        self.wind = 4.166 
+        # Configからパラメータを取得、なければデフォルト値 (configがNoneの場合の互換性のため)
+        if config:
+            self.wind = config.WIND_SPEED
+            self.theta_w = config.THETA_W
+            self.slope_factor = config.SLOPE_FACTOR
+            self.c_1 = config.C_1
+            self.c_2 = config.C_2
+        else:
+            # フォールバック (configが渡されなかった場合)
+            self.wind = 4.166
+            self.theta_w = 7 * math.pi / 4
+            self.slope_factor = 0.078
+            self.c_1 = 0.045
+            self.c_2 = 0.131
 
     # CellオブジェクトをNumPy配列に変換し、numba関数を呼び出す
     def update_grid(self, grid, infection_time, get_neighbors, recovery_time, P_h, cell_size_m):
@@ -145,7 +159,9 @@ class GridUpdater:
             recovery_time, P_h, cell_size_m,
             # 状態定数を渡す
             self.params['GREEN'], self.params['ACTIVE'], self.params['BURNED'], 
-            self.params['DILUTED'], self.params['RIVER'], self.params['WATER'] 
+            self.params['DILUTED'], self.params['RIVER'], self.params['WATER'],
+            # 物理パラメータを渡す
+            self.slope_factor, self.wind, self.theta_w, self.c_1, self.c_2
         )
         
         # 結果をCellオブジェクトグリッドに戻す

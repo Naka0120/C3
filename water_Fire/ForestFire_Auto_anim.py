@@ -8,9 +8,9 @@ from matplotlib.widgets import Button
 import imageio
 # ★★★ ファイル名をupdate_grid_numbaに変更 ★★★
 from update_grid_numba import GridUpdater 
-# ★★★ -------------------------------- ★★★
 from cells import Cell
 from gsi_fetcher import GsiFetcher
+import config
 
 # --- 状態定数（WATERを追加） ---
 GREEN, ACTIVE, BURNED, DILUTED, RIVER, WATER = 0, 1, 2, 3, 4, 5
@@ -21,8 +21,8 @@ class SIRCellularAutomataInteractive:
     water_mode_active = False
     active_threshold_reached = False
     is_drawing = False  # ドラッグ中かどうか
-    ACTIVE_THRESHOLD = 50  # ACTIVEセルがこの数を超えたら水設置可能
-    MAX_WATER_CELLS_PER_DRAG_STEP = 9   # 1回のイベントで設置できる最大セル数 (3x3=9セル)
+    ACTIVE_THRESHOLD = config.ACTIVE_THRESHOLD  # ACTIVEセルがこの数を超えたら水設置可能
+    MAX_WATER_CELLS_PER_DRAG_STEP = config.MAX_WATER_CELLS_PER_DRAG_STEP   # 1回のイベントで設置できる最大セル数 (3x3=9セル)
     is_eligible_for_water = False
 
     # --- 座標変換定数 (USA_Fire/L2F_inputmap.csvより導出) ---
@@ -30,7 +30,7 @@ class SIRCellularAutomataInteractive:
     GRID_ORIGIN_Y = 3383228
     GRID_RES = 44.835
 
-    def __init__(self, grid_size=200, infection_probability=0.058, recovery_time=217, cell_size_m=10, 
+    def __init__(self, grid_size=config.GRID_SIZE, infection_probability=config.P_H, recovery_time=config.RECOVERY_TIME, cell_size_m=config.CELL_SIZE_M, 
                  terrain_mode="DUMMY", csv_filepath_elev=None, csv_filepath_vege=None, csv_filepath_ign=None, base_lat=None, base_lon=None):
 
         self.grid_size = grid_size
@@ -125,9 +125,9 @@ class SIRCellularAutomataInteractive:
         self.water_timer = np.zeros((grid_size, grid_size), dtype=np.int32)           # WATER設置からの経過ステップ
         self.water_prev_state = np.full((grid_size, grid_size), -1, dtype=np.int32)   # WATERを置いた時の元状態を保持
         # デフォルトの経過ステップ（2ステップ後に消滅）
-        self.WATER_ON_ACTIVE_DURATION = 2   # ACTIVE上のWATERがこのステップ数経過でBURNEDに変化
-        self.WATER_ON_GREEN_DURATION = 2   # GREEN上のWATERがこのステップ数経過で再びGREENに戻る
-        self.WATER_ON_BURNED_DURATION = 2   # BURNED上のWATERがこのステップ数経過で再びBURNEDに戻る
+        self.WATER_ON_ACTIVE_DURATION = config.WATER_ON_ACTIVE_DURATION   # ACTIVE上のWATERがこのステップ数経過でBURNEDに変化
+        self.WATER_ON_GREEN_DURATION = config.WATER_ON_GREEN_DURATION   # GREEN上のWATERがこのステップ数経過で再びGREENに戻る
+        self.WATER_ON_BURNED_DURATION = config.WATER_ON_BURNED_DURATION   # BURNED上のWATERがこのステップ数経過で再びBURNEDに戻る
 
         # --- Cellオブジェクトグリッドの生成 --- 
         self.grid = np.empty((grid_size, grid_size), dtype=object)
@@ -148,7 +148,7 @@ class SIRCellularAutomataInteractive:
             'RIVER': RIVER,
             'WATER': WATER # 新しい状態を追加
         }
-        self.grid_updater = GridUpdater(self.params)
+        self.grid_updater = GridUpdater(self.params, config=config)
 
     # active_functionはGridUpdaterクラスの静的メソッドとして定義されているため、ここでは削除
 
@@ -486,26 +486,26 @@ class SIRCellularAutomataInteractive:
 # --- メイン処理 ---
 if __name__ == '__main__':
     
-    TERRAIN_MODE = "CSV"  # "DUMMY"で動作を確認してください
+    TERRAIN_MODE = config.TERRAIN_MODE  # "DUMMY"で動作を確認してください
 
     # APIモード用の地理空間設定
     api_params = {
-        "base_lat": 34.776,
-        "base_lon": 135.252,
+        "base_lat": config.API_BASE_LAT,
+        "base_lon": config.API_BASE_LON,
     }
 
     # CSVモード用のファイルパス設定 (ignitionを追加)
     csv_params = {
-        "csv_filepath_elev": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\elevation_grid.csv",
-        "csv_filepath_vege": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\vegetation_grid.csv",
-        "csv_filepath_ign": "C:\\Users\\souta\\Work\\C3\\water_Fire\\USA_Fire\\ignition_synced_wide.csv"
+        "csv_filepath_elev": config.CSV_FILEPATH_ELEV,
+        "csv_filepath_vege": config.CSV_FILEPATH_VEGE,
+        "csv_filepath_ign": config.CSV_FILEPATH_IGN
     }
 
     sim_params = {
-        "grid_size": 200,
-        "infection_probability": 0.058,
-        "recovery_time": 217,
-        "cell_size_m": 10
+        "grid_size": config.GRID_SIZE,
+        "infection_probability": config.P_H,
+        "recovery_time": config.RECOVERY_TIME,
+        "cell_size_m": config.CELL_SIZE_M
     }
 
     all_params = sim_params.copy()
