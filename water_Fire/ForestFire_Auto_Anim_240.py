@@ -5,12 +5,12 @@ import os
 import csv
 from matplotlib.colors import ListedColormap
 from matplotlib.widgets import Button
+import imageio
 # ★★★ ファイル名をupdate_grid_numbaに変更 ★★★
 from update_grid_numba import GridUpdater 
-# ★★★ -------------------------------- ★★★
 from cells import Cell
 from gsi_fetcher import GsiFetcher
-import config 
+import config
 
 # --- 状態定数（WATERを追加） ---
 GREEN, ACTIVE, BURNED, DILUTED, RIVER, WATER = 0, 1, 2, 3, 4, 5
@@ -163,13 +163,9 @@ class SIRCellularAutomataInteractive:
                 for row in reader:
                     try:
                         elapsed_sec = float(row['Elapsed_Sec'])
-                        time_step = int(elapsed_sec/6) # 6秒を1ステップとして扱う想定
+                        time_step = int(elapsed_sec / 6) # 6秒を1ステップとして扱う
                         
                         points = []
-                        # Ign1_X, Ign1_Y から Ign10_X, Ign10_Y くらいまであると想定してループ、あるいは列名固定
-                        # CSVには 'Ign1_X', 'Ign1_Y', 'Ign2_X', ... がある
-                        
-                        # 存在する全てのIgnカラムを探索
                         i = 1
                         while True:
                             col_x = f'Ign{i}_X'
@@ -184,12 +180,6 @@ class SIRCellularAutomataInteractive:
                                 try:
                                     utm_x = float(val_x)
                                     utm_y = float(val_y)
-                                    
-                                    # UTM -> Grid Index 変換
-                                    # col = (utm_x - origin_x) / res
-                                    # row = (origin_y - utm_y) / res  (Yは北がプラス、行インデックスは下が増加なので反転...
-                                    #  通常グリッド画像は上が行0。地図座標Yは上が大きい。
-                                    #  したがって origin_y からの差分を res で割るのが一般的)
                                     
                                     c = int((utm_x - self.GRID_ORIGIN_X) / self.GRID_RES)
                                     r = int((self.GRID_ORIGIN_Y - utm_y) / self.GRID_RES)
@@ -232,7 +222,7 @@ class SIRCellularAutomataInteractive:
             if active_count >= self.ACTIVE_THRESHOLD:
                 self.active_threshold_reached = True
                 print(f"\n🔥🔥🔥 **火災が深刻化: ACTIVEセルが{self.ACTIVE_THRESHOLD}個を超えました！** 🔥🔥🔥")
-                print("--- '水設置モード'ボタンが有効化されました。---")
+                # print("--- '水設置モード'ボタンが有効化されました。---")
 
         # Cellオブジェクトグリッドを更新 (numbaで高速化された処理)
         self.grid, self.infection_time = self.grid_updater.update_grid(
@@ -287,131 +277,61 @@ class SIRCellularAutomataInteractive:
 
 
     # --- UI/インタラクション関連 ---
+    # GIF生成用スクリプトなので、UI関連メソッドは使用しませんが、クラス構造維持のため残します
     def toggle_pause(self, event):
-        """シミュレーションの一時停止/再開を切り替える"""
-        SIRCellularAutomataInteractive.is_paused = not SIRCellularAutomataInteractive.is_paused
-        print(f"シミュレーション: {'一時停止中' if SIRCellularAutomataInteractive.is_paused else '再開'}")
-        self.pause_button.label.set_text('Restart' if SIRCellularAutomataInteractive.is_paused else 'Pause')
-
+        pass
     def toggle_water_mode(self, event):
-        """水設置モードの切り替え"""
-        if not self.active_threshold_reached:
-            print(f"⚠️ **火災規模が小さすぎます。ACTIVEセルが{self.ACTIVE_THRESHOLD}個を超えるまで待ってください。** ⚠️")
-            return
-            
-        SIRCellularAutomataInteractive.water_mode_active = not SIRCellularAutomataInteractive.water_mode_active
-        print(f"水設置モード: {'ON (click/drag)' if SIRCellularAutomataInteractive.water_mode_active else 'OFF'}")
-        self.water_button.label.set_text(
-            'water (OFF)' if SIRCellularAutomataInteractive.water_mode_active else 'water (ON)'
-        )
-
-    # 水設置ロジックを分離
+        pass
     def place_water(self, event):
-        """マウスイベントに基づいてセルに水を設置する"""
-        if SIRCellularAutomataInteractive.water_mode_active and event.xdata is not None and event.ydata is not None:
-            j = int(round(event.xdata))
-            i = int(round(event.ydata))
-
-            if 0 <= i < self.grid_size and 0 <= j < self.grid_size:
-                # 水を設置（例：3x3の範囲）
-                water_placed = False
-                for di in [-1, 0, 1]:
-                    for dj in [-1, 0, 1]:
-                        ni, nj = i + di, j + dj
-                        if 0 <= ni < self.grid_size and 0 <= nj < self.grid_size:
-                            # 樹木、火災、燃え跡のセルのみを水に変換（川はそのまま）
-                            prev = self.grid[ni, nj].state
-                            if prev == ACTIVE:
-                                t = self.infection_time[ni, nj]
-                                n = self.recovery_time
-                                if t <= 0.2 * n:  # 消火可能なACTIVEセルのみ
-                                    is_eligible_for_water = True
-
-                            if is_eligible_for_water:
-                                # 元状態を記録してタイマーをリセット
-                                self.grid[ni, nj].state = WATER
-                                self.water_timer[ni, nj] = 0
-                                self.water_prev_state[ni, nj] = prev
-                                water_placed = True
-                
-                # 描画を強制更新
-                if water_placed:
-                    self.state_grid_update_from_grid()
-                    self.visualize(self.current_step, 0, self.ax1)
-                    self.fig.canvas.draw_idle()
-
+        pass
     def onclick(self, event):
-        """マウスボタンが押されたときにドラッグを開始し、水を設置する"""
-        if SIRCellularAutomataInteractive.water_mode_active and event.button == 1: # 左クリックのみ
-            SIRCellularAutomataInteractive.is_drawing = True
-            self.place_water(event) # 押し始めの1点を設置
-
+        pass
     def onrelease(self, event):
-        """マウスボタンが離されたときにドラッグを終了する"""
-        if event.button == 1:
-            SIRCellularAutomataInteractive.is_drawing = False
-
+        pass
     def on_motion(self, event):
-        """ドラッグ中にマウスが移動したときに水を連続設置する"""
-        if SIRCellularAutomataInteractive.is_drawing:
-            self.place_water(event)
-
-
+        pass
     def state_grid_update_from_grid(self):
-        """Cellオブジェクトグリッドからstate_gridを更新する"""
-        for i in range(self.grid_size):
+         for i in range(self.grid_size):
             for j in range(self.grid_size):
                 self.state_grid[i, j] = self.grid[i, j].state
-    
-    # --- シミュレーション実行 ---
     def simulate_interactive(self, t_end, ax1, ax3):
-        self.fig, self.ax1 = plt.subplots(1, 2, figsize=(15, 7))
-        self.ax3 = self.ax1[1]
-        self.ax1 = self.ax1[0]
-        self.fig.suptitle(f'Forest Fire Simulation: Water Threshold={self.ACTIVE_THRESHOLD}', fontsize=16)
+        pass
 
-        self.visualize_heatmap(self.ax3)
-        self.visualize(0, t_end, self.ax1) # 初回描画
-
-        # UIボタンの設定
-        ax_pause = self.fig.add_axes([0.1, 0.01, 0.1, 0.04]) # [left, bottom, width, height]
-        self.pause_button = Button(ax_pause, 'Pause')
-        self.pause_button.on_clicked(self.toggle_pause)
-
-        ax_water = self.fig.add_axes([0.22, 0.01, 0.15, 0.04])
-        self.water_button = Button(ax_water, 'Water (ON)')
-        self.water_button.on_clicked(self.toggle_water_mode)
+    def simulate_and_save_gif(self, t_end, filename="forestfire_simulation_usa.gif", fps=10):
+        """非インタラクティブでシミュレーションを実行し、GIFファイルとして保存する"""
+        fig, ax = plt.subplots(figsize=(8, 8))
+        ax.set_xticks([]); ax.set_yticks([])
+        frames = []
         
-        # マウスイベントを接続
-        self.fig.canvas.mpl_connect('button_press_event', self.onclick)    # 押す
-        self.fig.canvas.mpl_connect('button_release_event', self.onrelease)  # 離す
-        self.fig.canvas.mpl_connect('motion_notify_event', self.on_motion)  # 移動
-
-        
+        print(f"シミュレーションを開始します (GIF出力、全{t_end}ステップ、間隔=1ステップ)...")
         for t in range(t_end):
-            self.current_step = t
-            if not SIRCellularAutomataInteractive.is_paused:
-                # 動的着火判定
-                if hasattr(self, 'ignition_events') and t in self.ignition_events:
-                    for (r, c) in self.ignition_events[t]:
-                        if self.grid[r, c].state != ACTIVE and self.grid[r, c].state != BURNED and self.grid[r, c].state != RIVER:
-                             self.grid[r, c].state = ACTIVE
-                             self.state_grid[r, c] = ACTIVE # state_gridも同期
-                             self.infection_time[r, c] = 0
-                             print(f"Time {t}: Ignition at ({r}, {c})")
+            # 動的着火判定
+            if hasattr(self, 'ignition_events') and t in self.ignition_events:
+                for (r, c) in self.ignition_events[t]:
+                    if self.grid[r, c].state != ACTIVE and self.grid[r, c].state != BURNED and self.grid[r, c].state != RIVER:
+                            self.grid[r, c].state = ACTIVE
+                            self.state_grid[r, c] = ACTIVE # state_gridも同期
+                            self.infection_time[r, c] = 0
+                            # print(f"Time {t}: Ignition at ({r}, {c})")
 
-                self.update_grid()
-                
-                # 描画間隔を調整 (1ステップに1回)
-                if t % 1 == 0:
-                    self.visualize(t, t_end, self.ax1)
+            self.update_grid()
             
-            # plt.pause(0.05) # 描画更新間隔 -> 不要または短くする
+            # 描画間隔を1ステップごとに設定
             if t % 1 == 0:
-                 plt.pause(0.01)
+                self.visualize(t, t_end, ax)
+                fig.canvas.draw()
+                image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
+                image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+                frames.append(image)
+            
+            if t % 10 == 0:
+                print(f"Processing step {t}/{t_end}...")
 
-            if not plt.get_fignums(): # ウィンドウが閉じられたら終了
-                break
+        plt.close(fig)
+        print(f"GIF動画を保存中... ({filename})")
+        # imageioでGIF保存 (loop=0 for infinite loop)
+        imageio.mimsave(filename, frames, fps=fps, loop=0)
+        print(f"{filename} を保存しました。")
 
     # --- 可視化 ---
     def visualize(self, time_step, t_end, ax1):
@@ -461,18 +381,10 @@ class SIRCellularAutomataInteractive:
                 color_grid[i, j] = 5 # 中間の赤(消火不可)
 
         ax1.imshow(color_grid, cmap=cmap, vmin=0, vmax=9)
-        ax1.set_title(f"Fire Spread at Time: {time_step + 1} | Water Mode: {'ON' if self.water_mode_active else 'OFF'}")
+        # ax1.set_title(f"Fire Spread at Time: {time_step + 1}")
+        ax1.text(0.5, 1.05, f"Fire Spread at Time: {time_step + 1}", 
+                 size=12, ha="center", transform=ax1.transAxes)
         ax1.set_xticks([]); ax1.set_yticks([]) # 軸の表示をオフ
-
-    def visualize_heatmap(self, ax):
-        """標高のヒートマップを指定された軸(ax)に描画する"""
-        ax.clear()
-        im = ax.imshow(self.height_grid, cmap='terrain')
-        ax.set_title("Elevation Heatmap (m)")
-        fig = ax.get_figure()
-        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        cbar.set_label('Elevation (meters)')
-        ax.set_xticks([]); ax.set_yticks([]) # 軸の表示をオフ
 
 
 # --- メイン処理 ---
@@ -486,7 +398,7 @@ if __name__ == '__main__':
         "base_lon": config.API_BASE_LON,
     }
 
-    # CSVモード用のファイルパス設定
+    # CSVモード用のファイルパス設定 (ignitionを追加)
     csv_params = {
         "csv_filepath_elev": config.CSV_FILEPATH_ELEV,
         "csv_filepath_vege": config.CSV_FILEPATH_VEGE,
@@ -511,13 +423,9 @@ if __name__ == '__main__':
     # シミュレータのインスタンスを作成
     sir_ca = SIRCellularAutomataInteractive(**all_params)
     
-    # 中央に火をつける
-    # center = sim_params["grid_size"] // 2
-    # sir_ca.grid[center, center].state = ACTIVE
+    # GIF出力フラグ
+    EXPORT_GIF = True
 
-    # 着火点に火をつける (指定必要)
-    # sir_ca.grid[112, 103].state = ACTIVE -> 動的着火に移行するためコメントアウト
-
-
-    # シミュレーション実行 (plt.show()はsimulate_interactive内で制御されます)
-    sir_ca.simulate_interactive(500, None, None)
+    if EXPORT_GIF:
+        # 非インタラクティブで実行してGIFとして保存 (240ステップ)
+        sir_ca.simulate_and_save_gif(240, filename="forestfire_simulation_240.gif", fps=10)
