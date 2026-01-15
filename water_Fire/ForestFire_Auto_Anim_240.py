@@ -384,6 +384,12 @@ class SIRCellularAutomataInteractive:
         # ax1.set_title(f"Fire Spread at Time: {time_step + 1}")
         ax1.text(0.5, 1.05, f"Fire Spread at Time: {time_step + 1}", 
                  size=12, ha="center", transform=ax1.transAxes)
+        # 固定中心 (121, 89) から指定サイズのウィンドウを設定
+        center_r, center_c = 121, 89
+        half_size = config.VIEW_WINDOW_SIZE // 2
+        
+        ax1.set_xlim(center_c - half_size, center_c + half_size)
+        ax1.set_ylim(center_r + half_size, center_r - half_size) # Note: inverted Y axis
         ax1.set_xticks([]); ax1.set_yticks([]) # 軸の表示をオフ
 
 
@@ -428,4 +434,4 @@ if __name__ == '__main__':
 
     if EXPORT_GIF:
         # 非インタラクティブで実行してGIFとして保存 (240ステップ)
-        sir_ca.simulate_and_save_gif(240, filename="forestfire_simulation_240.gif", fps=10)
+        sir_ca.simulate_and_save_gif(240, filename="forestfire_simulation_240.gif", fps=config.ANIMATION_FPS)

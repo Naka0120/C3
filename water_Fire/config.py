@@ -7,10 +7,10 @@ GRID_SIZE = 200
 CELL_SIZE_M = 10
 
 # Infection (Burn) Probability Base
-P_H = 0.025  # 論文値 0.58 corresponds to 0.025 in this scale/implementation
+P_H = 0.010  # 論文値 0.58 corresponds to 0.025 in this scale/implementation
 
 # Recovery Time (Steps or Arbitrary Time Unit)
-RECOVERY_TIME = 217
+RECOVERY_TIME = 150
 
 # --- Physics / Environmental Constants ---
 # Slope Effect
@@ -21,8 +21,8 @@ WIND_SPEED = 4.5  # m/s?
 THETA_W = 3 * math.pi / 4  # Wind Direction (Radians)
 
 # Wind Effect Coefficients (from param.txt)
-C_1 = 0.4   # 論文値 0.045 -> param.txt says 0.4
-C_2 = 0.64  # 論文値 0.131 -> param.txt says 0.64
+C_1 = 0.09   # 論文値 0.045 -> param.txt says 0.09
+C_2 = 0.262  # 論文値 0.131 -> param.txt says 0.262
 
 # --- Interaction / Water Control ---
 # Threshold of ACTIVE cells to enable water placement
@@ -47,3 +47,8 @@ CSV_FILEPATH_IGN = r"USA_Fire\ignition_synced_wide.csv"
 # API Mode Settings
 API_BASE_LAT = 34.776
 API_BASE_LON = 135.252
+
+# Animation Settings
+ANIMATION_FPS = 30          # Output GIF speed (Frames Per Second)
+VIEW_WINDOW_SIZE = 45       # Size of the zoomed-in window (height/width in cells)
+
