@@ -421,8 +421,9 @@ class SIRCellularAutomataInteractive:
 
             self.update_grid()
             
-            # 描画 (毎ステップ)
-            self.visualize(t, t_end, ax1)
+            # 描画 (2ステップごとに描画)
+            if t % 2 == 0:
+                self.visualize(t, t_end, ax1)
             
             # Canvasを更新して画像を取得
             fig.canvas.draw()
@@ -544,7 +545,7 @@ if __name__ == '__main__':
 
     if EXPORT_GIF:
         # 非インタラクティブで実行してGIFとして保存 (500ステップ)
-        sir_ca.simulate_and_save_gif(500, filename="forestfire_simulation_log.gif", fps=10)
+        sir_ca.simulate_and_save_gif(500, filename="forestfire_simulation_log.gif", fps=60)
     else:
         # インタラクティブ実行
         sir_ca.simulate_interactive(320, None, None)
