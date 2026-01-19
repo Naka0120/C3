@@ -1,3 +1,5 @@
+# 240ステップ分のアニメーションをGIFとして出力
+
 import matplotlib.pyplot as plt
 import numpy as np
 import math

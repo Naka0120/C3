@@ -1,3 +1,5 @@
+# シミュレーション画面全てをGifアニメ化して出力
+
 import matplotlib.pyplot as plt
 import numpy as np
 import math
@@ -6,6 +8,8 @@ import csv
 from matplotlib.colors import ListedColormap
 from matplotlib.widgets import Button
 import imageio
+import warnings
+warnings.filterwarnings("ignore")
 # ★★★ ファイル名をupdate_grid_numbaに変更 ★★★
 from update_grid_numba import GridUpdater 
 from cells import Cell
@@ -40,7 +44,7 @@ class SIRCellularAutomataInteractive:
         self.current_step = 0
 
         # --- 地形情報の準備 (ダミーのみ) ---
-        print(f"--- 地形モード: {terrain_mode} ---")
+        # print(f"--- 地形モード: {terrain_mode} ---")
 
         if terrain_mode == "API":
             if base_lat is None or base_lon is None:
@@ -51,7 +55,7 @@ class SIRCellularAutomataInteractive:
         elif terrain_mode == "CSV":
             if csv_filepath_elev is None or not os.path.exists(csv_filepath_elev):
                 raise FileNotFoundError(f"CSVファイルが見つかりません: {csv_filepath_elev}")
-            print(f"標高CSVファイル '{csv_filepath_elev}' を読み込みます...")
+            # print(f"標高CSVファイル '{csv_filepath_elev}' を読み込みます...")
             self.height_grid = np.loadtxt(csv_filepath_elev, delimiter=',')
             # 左右反転してから左に90度回転
             # self.height_grid = np.fliplr(self.height_grid)
@@ -61,7 +65,7 @@ class SIRCellularAutomataInteractive:
 
             if csv_filepath_vege is None or not os.path.exists(csv_filepath_vege):
                 raise FileNotFoundError(f"CSVファイルが見つかりません: {csv_filepath_vege}")
-            print(f"植生CSVファイル '{csv_filepath_vege}' を読み込みます...")
+            # print(f"植生CSVファイル '{csv_filepath_vege}' を読み込みます...")
             self.vegetation_grid = np.loadtxt(csv_filepath_vege, delimiter=',')
             # self.vegetation_grid = np.fliplr(self.vegetation_grid)
             # self.vegetation_grid = np.rot90(self.vegetation_grid, k=1)  # 左に90度回転
@@ -73,10 +77,11 @@ class SIRCellularAutomataInteractive:
             # 着火点データの読み込み
             self.ignition_events = {}
             if csv_filepath_ign and os.path.exists(csv_filepath_ign):
-                print(f"着火点CSVファイル '{csv_filepath_ign}'を読み込みます...")
+                # print(f"着火点CSVファイル '{csv_filepath_ign}'を読み込みます...")
                 self.load_ignition_data(csv_filepath_ign)
             else:
-                print("着火点CSVファイルが指定されていないか見つかりません。動的着火は無効です。")
+                pass
+                # print("着火点CSVファイルが指定されていないか見つかりません。動的着火は無効です。")
 
 
         elif terrain_mode == "DUMMY":
@@ -197,7 +202,7 @@ class SIRCellularAutomataInteractive:
 
                     except ValueError:
                         continue
-            print(f"着火データを読み込みました: {len(self.ignition_events)} タイムステップ分のイベント")
+            # print(f"着火データを読み込みました: {len(self.ignition_events)} タイムステップ分のイベント")
             
         except Exception as e:
             print(f"着火データの読み込みに失敗しました: {e}")
@@ -221,8 +226,8 @@ class SIRCellularAutomataInteractive:
             active_count = np.sum(self.state_grid == ACTIVE)
             if active_count >= self.ACTIVE_THRESHOLD:
                 self.active_threshold_reached = True
-                print(f"\n🔥🔥🔥 **火災が深刻化: ACTIVEセルが{self.ACTIVE_THRESHOLD}個を超えました！** 🔥🔥🔥")
-                print("--- '水設置モード'ボタンが有効化されました。---")
+                # print(f"\n🔥🔥🔥 **火災が深刻化: ACTIVEセルが{self.ACTIVE_THRESHOLD}個を超えました！** 🔥🔥🔥")
+                # print("--- '水設置モード'ボタンが有効化されました。---")
 
         # Cellオブジェクトグリッドを更新 (numbaで高速化された処理)
         self.grid, self.infection_time = self.grid_updater.update_grid(
@@ -388,14 +393,23 @@ class SIRCellularAutomataInteractive:
             if not plt.get_fignums(): # ウィンドウが閉じられたら終了
                 break
 
-    def simulate_and_save_gif(self, t_end, filename="forestfire_simulation_usa.gif", fps=10):
-        """非インタラクティブでシミュレーションを実行し、GIFファイルとして保存する"""
-        fig, ax = plt.subplots(figsize=(8, 8))
-        ax.set_xticks([]); ax.set_yticks([])
+    def simulate_and_save_gif(self, t_end, filename="forestfire_simulation_log.gif", fps=10):
+        """非インタラクティブでシミュレーションを実行し、全画面(マップ+ヒートマップ)をGIFファイルとして保存する"""
+        # インタラクティブモードと同じレイアウトを作成 (1行2列)
+        fig, axes = plt.subplots(1, 2, figsize=(15, 7))
+        ax1 = axes[0]
+        ax3 = axes[1]
+        
+        # ヒートマップ描画 (静的)
+        self.visualize_heatmap(ax3)
+
         frames = []
         
-        print(f"シミュレーションを開始します (GIF出力、間隔=2ステップ)...")
+        print(f"シミュレーションを開始します (GIF出力、ステップ={t_end})...")
         for t in range(t_end):
+            # Progress bar
+            print(f"\rGenerating Frame: {t+1}/{t_end}", end="")
+
             # 動的着火判定
             if hasattr(self, 'ignition_events') and t in self.ignition_events:
                 for (r, c) in self.ignition_events[t]:
@@ -407,16 +421,17 @@ class SIRCellularAutomataInteractive:
 
             self.update_grid()
             
-            # 描画間隔を2ステップごとに設定
-            if t % 2 == 0:
-                self.visualize(t, t_end, ax)
-                fig.canvas.draw()
-                image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
-                image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-                frames.append(image)
+            # 描画 (毎ステップ)
+            self.visualize(t, t_end, ax1)
+            
+            # Canvasを更新して画像を取得
+            fig.canvas.draw()
+            image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8')
+            image = image.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            frames.append(image)
 
         plt.close(fig)
-        print(f"GIF動画を保存中... ({filename})")
+        print(f"\nGIF動画を保存中... ({filename})")
         # imageioでGIF保存 (loop=0 for infinite loop)
         imageio.mimsave(filename, frames, fps=fps, loop=0)
         print(f"{filename} を保存しました。")
@@ -469,6 +484,8 @@ class SIRCellularAutomataInteractive:
                 color_grid[i, j] = 5 # 中間の赤(消火不可)
 
         ax1.imshow(color_grid, cmap=cmap, vmin=0, vmax=9)
+        # Add contour lines (elevation) -> Removed as per request
+        # ax1.contour(self.height_grid, origin='upper', colors='black', alpha=0.4, linewidths=0.5)
         ax1.set_title(f"Fire Spread at Time: {time_step + 1} | Water Mode: {'ON' if self.water_mode_active else 'OFF'}")
         ax1.set_xticks([]); ax1.set_yticks([]) # 軸の表示をオフ
 
@@ -526,8 +543,8 @@ if __name__ == '__main__':
     EXPORT_GIF = True
 
     if EXPORT_GIF:
-        # 非インタラクティブで実行してGIFとして保存
-        sir_ca.simulate_and_save_gif(320, filename="forestfire_simulation_usa.gif", fps=10)
+        # 非インタラクティブで実行してGIFとして保存 (500ステップ)
+        sir_ca.simulate_and_save_gif(500, filename="forestfire_simulation_log.gif", fps=10)
     else:
         # インタラクティブ実行
         sir_ca.simulate_interactive(320, None, None)
